@@ -1,0 +1,28 @@
+import {motion} from 'framer-motion';import {useEffect,useMemo,useRef,useState} from 'react';
+import type {Api} from '../../types';import {Btn,pop} from '../../components/ui';import {sfx} from '../../lib/sound';import {IBackspace,IBulb,ICheck} from '../../components/Icons';import {PUZZLES,buildEntries,liveScore} from './logic';
+const KB=['ABCDEFG','HIJKLMN','OPQRSTU','VWXYZ'];
+export function Crossword({api}:{api:Api}){const P=PUZZLES[api.cfg.level]??PUZZLES.Easy;const {entries:E,nums}=useMemo(()=>buildEntries(P.rows,P.across,P.down),[P]);const n=P.rows.length,m=P.rows[0].length;
+const total=P.rows.join('').replace(/#/g,'').length;
+const [v,setV]=useState<string[][]>(()=>P.rows.map(r=>[...r].map(()=>'')));const [sel,setSel]=useState<[number,number]>([0,0]);const [dir,setDir]=useState<'a'|'d'>('a');const [hints,setHints]=useState(0);const [bad,setBad]=useState<string[]>([]);const [msg,setMsg]=useState('Tap a cell, then type.');
+const at=(r:number,c:number,d:'a'|'d')=>E.find(e=>e.dir===d&&e.cells.some(([y,x])=>y===r&&x===c));
+const cur=at(sel[0],sel[1],dir)??at(sel[0],sel[1],dir==='a'?'d':'a');
+const correct=(g:string[][])=>g.reduce((a,row,r)=>a+row.filter((x,c)=>x!==''&&x===P.rows[r][c]).length,0);
+const commit=(g:string[][],h:number)=>{setV(g);const s=liveScore(correct(g),h);api.setScore(s);if(correct(g)===total){sfx('win');setTimeout(()=>api.finish({score:s+Math.max(0,240-api.elapsed()),win:true,detail:`Solved · ${h} hint${h===1?'':'s'}`}),700)}};
+const type=(ch:string)=>{if(api.paused||!cur)return;api.touch();const [r,c]=sel;const g=v.map(x=>[...x]);
+if(ch==='⌫'){if(g[r][c])g[r][c]='';else{const i=cur.cells.findIndex(([y,x])=>y===r&&x===c);if(i>0){const [pr,pc]=cur.cells[i-1];g[pr][pc]='';setSel([pr,pc])}}}
+else{g[r][c]=ch;sfx('tap',(ch.charCodeAt(0)%10)*20);const i=cur.cells.findIndex(([y,x])=>y===r&&x===c);if(i<cur.cells.length-1)setSel(cur.cells[i+1])}
+setBad(b=>b.filter(k=>k!==`${r},${c}`));setMsg('');commit(g,hints)};
+const hint=()=>{if(api.paused)return;const [r,c]=sel;if(v[r][c]===P.rows[r][c])return;api.touch();const g=v.map(x=>[...x]);g[r][c]=P.rows[r][c];setHints(hints+1);pop('−40','#FF4500');setMsg('Letter revealed (−40)');commit(g,hints+1)};
+const check=()=>{const b:string[]=[];v.forEach((row,r)=>row.forEach((x,c)=>{if(x&&x!==P.rows[r][c])b.push(`${r},${c}`)}));setBad(b);sfx(b.length?'bad':'good');setMsg(b.length?`✕ ${b.length} wrong letter${b.length>1?'s':''}`:'✓ All letters so far are right')};
+const tap=(r:number,c:number)=>{if(sel[0]===r&&sel[1]===c){const o=dir==='a'?'d':'a';if(at(r,c,o))setDir(o)}else setSel([r,c])};
+const ref=useRef(type);ref.current=type;const selRef=useRef(sel);selRef.current=sel;
+useEffect(()=>{const f=(e:KeyboardEvent)=>{if(e.ctrlKey||e.metaKey||e.altKey)return;const k=e.key;if(/^[a-z]$/i.test(k))ref.current(k.toUpperCase());else if(k==='Backspace')ref.current('⌫');else if(k.startsWith('Arrow')){e.preventDefault();const d={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1]}[k] as [number,number];let [r,c]=selRef.current;do{r+=d[0];c+=d[1]}while(r>=0&&c>=0&&r<n&&c<m&&P.rows[r][c]==='#');if(r>=0&&c>=0&&r<n&&c<m){setSel([r,c]);setDir(d[0]?'d':'a')}}};window.addEventListener('keydown',f);return()=>window.removeEventListener('keydown',f)},[P,n,m]);
+const cs=`min(54px,calc((100vw - 64px) / ${m}))`;
+return <div><div className="grid gap-4 md:grid-cols-[auto_1fr]"><div><div className="no-pan mx-auto grid w-max gap-[3px]" style={{gridTemplateColumns:`repeat(${m},${cs})`,['--cs' as string]:cs}}>
+{P.rows.map((row,r)=>[...row].map((ch,c)=>{if(ch==='#')return <i key={`${r}${c}`} className="rounded-md bg-night" style={{height:cs}}/>;const isSel=sel[0]===r&&sel[1]===c,inW=cur?.cells.some(([y,x])=>y===r&&x===c),k=`${r},${c}`,b=bad.includes(k);
+return <motion.button key={k} onClick={()=>tap(r,c)} whileTap={{scale:.92}} aria-label={`Row ${r+1}, column ${c+1}${nums[k]?`, clue ${nums[k]}`:''}, ${v[r][c]||'empty'}`} className={`relative rounded-md border-2 font-display text-2xl font-bold ${b?'border-fire':'border-hot/40'}`} style={{height:cs,background:isSel?'#FFD700':inW?'#FF69B4':'#31093D',color:isSel||inW?'#12000F':v[r][c]?'#FFD700':'#FFF4FA'}}>
+{nums[k]&&<sup className="absolute left-1 top-0 text-[10px] font-semibold">{nums[k]}</sup>}<motion.span key={v[r][c]} initial={{scale:.3,opacity:0}} animate={{scale:1,opacity:1}}>{v[r][c]}</motion.span>{b&&<em className="absolute bottom-0 right-1 text-xs not-italic text-fire">✕</em>}</motion.button>}))}</div>
+<p role="status" className="mt-2 min-h-6 text-center font-semibold">{msg}</p>
+<div className="flex justify-center gap-2"><Btn className="bg-fire" onClick={hint}><span className="flex items-center gap-2"><IBulb className="h-5 w-5"/>Hint −40</span></Btn><Btn className="bg-gold" onClick={check}><span className="flex items-center gap-2"><ICheck className="h-5 w-5"/>Check</span></Btn></div></div>
+<div><div className="grid grid-cols-2 gap-3 text-sm">{(['a','d'] as const).map(d=><div key={d}><h3 className="font-display text-gold">{d==='a'?'Across':'Down'}</h3>{E.filter(e=>e.dir===d).map(e=><button key={e.n+d} onClick={()=>{setDir(d);setSel(e.cells[0])}} className={`min-h-11 w-full rounded-xl px-2 text-left ${e===cur?'bg-hot/30 font-semibold':''}`}><b className="text-hot">{e.n}.</b> {e.clue}</button>)}</div>)}</div>
+<div className="mt-3 space-y-1.5">{KB.map((r,i)=><div key={r} className="flex justify-center gap-1.5">{[...r].map(l=><Btn key={l} onClick={()=>type(l)} aria-label={l} className="h-12 w-11 bg-snow px-0 text-lg">{l}</Btn>)}{i===3&&<Btn onClick={()=>type('⌫')} aria-label="Backspace" className="h-12 w-11 bg-fire px-0"><IBackspace className="mx-auto h-6 w-6"/></Btn>}</div>)}</div></div></div></div>}
